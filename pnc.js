@@ -1,7 +1,27 @@
 var config = require('./config');
 var request = require('request-promise');
 var _  = require('lodash');
+// require('request-debug')(request);
+
+
 var tags = ['ROT','EOL','eTrash']
+
+function authenticate(user,pass){
+  var options = {
+    uri: 'http://fa.everteam.us:8080/uaa/oauth/token',
+    method:'POST',
+    headers:{
+      'Authorization':'Basic d2ViX2FwcDo=',
+      'Accept':'application/json'
+    },
+    form:{
+      grant_type:'password',
+      username:user,
+      password:pass
+    }
+  }
+  return request(options);
+}
 
 function getTaggedFiles(tag, cb){
   request.get({
@@ -84,8 +104,25 @@ module.exports = function(app){
     })
   })
   app.post('/delete',(req,res) => {
-    var data = req.body;
-    console.log(data);
-    res.status(200);
+    var data = req.body.cs_uid;
+    authenticate('admin','admin')
+      .then(function(body){
+        var token = JSON.parse(body).access_token
+        request({
+          uri: encodeURI('http://fa.everteam.us:8080/storage/api/files/delete?ids=' + JSON.stringify(data)),
+          method:'POST',
+          headers:{
+            'Authorization':'Bearer ' + token,
+            'Accept':'application/json',
+            'Contenty-Type':'application/json'
+          },
+          json:true
+        })
+          .then(function(result){
+            // console.log(result);
+            res.status(200).send({status:"ok"});
+          })
+      })
+
   })
 }
