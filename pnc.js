@@ -83,4 +83,7 @@ module.exports = function(app){
       res.status(200).send(data);
     })
   })
+  app.post('/delete',(req,res) => {
+    var data = req.body.cs_uid;
+  })
 }
