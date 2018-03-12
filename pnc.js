@@ -25,7 +25,7 @@ function authenticate(user,pass){
 
 function getTaggedFiles(tag, cb){
   request.get({
-    uri: config.solr + '/select?fl=cs_uid,repositoryId,fileName,folderPath,content_type,fileSize&q=user_action:' + tag,
+    uri: config.solr + '/select?rows=1000&fl=cs_uid,repositoryId,fileName,folderPath,content_type,fileSize&q=user_action:' + tag,
     json:true
   })
   .then(function(data){
