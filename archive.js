@@ -25,18 +25,20 @@ var processFile = function(job,done){
           var actualFilePath = path.join(config.archivePath,'files',fileMetadata.fileName);
           faClient.getFileContent(data,authResult.access_token)
             .pipe(fs.createWriteStream(actualFilePath))
-          fileMetadata.file = actualFilePath;
           var xmldoc = new dom().parseFromString("<record/>");
           var s = new serializer();
           var baseNode = xmldoc.firstChild;
           _.each(fileMetadata,(value,key) => {
-              if(_.includes(['file','cs_uid','repositoryId','fileName','date','cs_allow','cs_type','created','lastAccessed','lastModified','folder','content_type','fileType'],key)){
+              if(_.includes(['cs_uid','repositoryId','fileName','date','cs_allow','cs_type','created','lastAccessed','lastModified','folder','content_type','fileType'],key)){
                 var dataChild = xmldoc.createElement('data');
                 dataChild.setAttribute("name",key);
                 dataChild.appendChild(xmldoc.createTextNode(value));
                 baseNode.appendChild(dataChild);
               }
           });
+          var fileChild = xmldoc.createElement('file');
+          fileChild.appendChild(xmldoc.createTextNode(actualFilePath));
+          baseNode.appendChild(fileChild);
           fs.writeFileSync(xmlFilePath,s.serializeToString(xmldoc));
 
           done();
