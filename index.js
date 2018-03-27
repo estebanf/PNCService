@@ -7,6 +7,9 @@ app.use(bodyParser.urlencoded({     // to support URL-encoded bodies
 }));
 
 require('./pnc')(app);
+app.get('/',(req,res) => {
+  res.status(200).send("Hello world");
+});
 
 app.listen(config.port, () => {
   console.log("Server listening")

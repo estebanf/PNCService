@@ -12,9 +12,11 @@
     "body-parser": "^1.18.2",
     "express": "^4.16.2",
     "express-xml-bodyparser": "^0.3.0",
+    "kue": "^0.11.6",
     "lodash": "^4.17.5",
     "request": "^2.83.0",
     "request-promise": "^4.2.2",
+    "xmldoc": "^1.1.0",
     "xmldom": "^0.1.27",
     "xpath": "0.0.27"
   },
