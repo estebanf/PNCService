@@ -10,13 +10,14 @@ var path = require('path');
 var config = require('./config');
 var dom = require('xmldom').DOMParser;
 var serializer = require('xmldom').XMLSerializer;
+var request = require('request-promise');
+
 
 var processFile = function(job,done){
   var data = job.data.vars
+  console.log("processing " + data)
   faClient.authenticate('admin','admin')
     .then((authResult) => {
-      console.log('here')
-
       faClient.getFile(data)
         .then((getFileResult) => {
           var fileMetadata = getFileResult.response.docs[0];
@@ -48,6 +49,7 @@ var processFile = function(job,done){
 }
 
 function getXmlFiles(){
+  console.log("Getting xml files");
   return new Promise(function(resolve,reject){
     fs.readdir(path.join(config.archivePath,'xml'),(err,files) => {
       var xmlFiles = _.filter(files,function(f) {
@@ -67,8 +69,11 @@ function getFileNode(file){
 }
 var finishJob = function(job,done){
   var files = [];
+  var xmldoc = new dom().parseFromString("<records/>");
+  var baseNode = xmldoc.firstChild;
   getXmlFiles()
     .then(function(result){
+      console.log('Reading files')
       files = _.map(result,(file) => {
         return path.join(config.archivePath,'xml',file)
       })
@@ -78,49 +83,85 @@ var finishJob = function(job,done){
       return Promise.all(promises);
     })
     .then(function(data){
-      var xmldoc = new dom().parseFromString("<records/>");
-      var baseNode = xmldoc.firstChild;
-      _.each(data,(node)=>{
-        baseNode.appendChild(node);
+      console.log('Appending nodes')
+      var promises = _.map(data,(node)=>{
+        return new Promise((resolve,reject) => {
+          baseNode.appendChild(node);
+          resolve();
+        })
       })
-      return xmldoc;
+      return Promise.all(promises);
     })
-    .then(function(doc){
+    .then(function(){
+      console.log('Writing input.xml')
       var s = new serializer();
       return new Promise((resolve,reject) => {
-        fs.writeFile(path.join(config.archivePath,'xml','input.xml'),s.serializeToString(doc),function(err){
+        fs.writeFile(path.join(config.archivePath,'xml','input.xml'),s.serializeToString(xmldoc),function(err){
           if(err){
             reject(err);
           }
-          resolve()
+          else{
+            resolve()
+          }
         });
       });
     })
     .then(function(){
-      _.each(files,(file) => {
-        fs.unlinkSync(file);
+      var promises = _.map(files,(file) => {
+        return new Promise(function(resolve,reject){
+          console.log('Deleting ' + file)
+          fs.unlink(file,(err) => {
+            if(err){
+              reject(err);
+            }
+            else{
+              resolve()
+            }
+          });
+
+        })
       })
-      done();
+      return Promise.all(promises);
     })
-  // var s = new serializer();
-  // var xmldoc = new dom().parseFromString("<records/>");
-  // var baseNode = xmldoc.firstChild;
-  // fs.readdir(path.join(config.archivePath,'xml'),(err,files) => {
-  //   var xmlFiles = _.filter(files,function(f) {
-  //     return f.endsWith(".xml");
-  //   })
-  //   _.each(xmlFiles,(file) => {
-  //     fs.readFile(path.join(config.archivePath,'xml',file),'utf8',(err,contents) =>{
-  //       var fdoc = new dom().parseFromString(contents);
-  //       baseNode.appendChild(fdoc.firstChild);
-  //     })
-  //   })
-  //   fs.writeFileSync(path.join(config.archivePath,'xml','input.xml'),s.serializeToString(xmldoc));
-  //   _.each(xmlFiles,(file) => {
-  //     fs.unlinkSync(path.join(config.archivePath,'xml',file));
-  //   });
-  //   done();
-  // })
+  .then(function(){
+    return request({
+              uri: 'http://work.everteam.us:8080/et_dev/Capture?Action=Run&Cmd=Submit&Name=FA_ARCHIVE_JOB&Param=FromURL=true&Param=Name=FA_ARCHIVE_JOB&user_token=3c3848679c88cea7395217e9131fd8d754649d77e0f1489a370c934daee91e1c57a370e759ebbb94c6f173fac33b4faf',
+              method:'POST',
+            })
+  })
+  .then(function(response){
+    console.log(response);
+    console.log('Waiting for archive');
+    return new Promise((resolve,reject) =>{
+      setTimeout(() => {
+        resolve()
+      },60000)
+    })
+  })
+  .then(function(){
+    console.log('Deleting start')
+    return new Promise((resolve,reject)=> {
+      fs.access(path.join(config.archivePath,'xml','start'), fs.constants.R_OK | fs.constants.W_OK, (err) => {
+        if(err){
+          reject(err);
+        }
+        else{
+          fs.unlink(path.join(config.archivePath,'xml','start'),(err2) => {
+            if(err2){
+              reject(err2);
+            }
+            else{
+              resolve();
+            }
+          });
+        }
+      });
+    });
+  })
+  .then(function(){
+    console.log('done')
+    done();
+  })
 }
 
 module.exports = function(ids){
@@ -133,7 +174,6 @@ module.exports = function(ids){
           console.log(err);
         }
         else{
-          console.log(job.id);
           jobs.push(job.id)
         }
       })
