@@ -20,40 +20,55 @@ var processFile = function(job,done){
     .then((authResult) => {
       faClient.getFile(data)
         .then((getFileResult) => {
-          var fileMetadata = getFileResult.response.docs[0];
-          var xmlFilePath = path.join(config.archivePath,'xml',job.id + '.xml')
+          return new Promise((resolve,reject) => {
+            var fileMetadata = getFileResult.response.docs[0];
+            // var xmlFilePath = path.join(config.archivePath,'xml',job.id + '.xml')
 
-          var actualFilePath = path.join(config.archivePath,'files',fileMetadata.fileName);
-          faClient.getFileContent(data,authResult.access_token)
-            .pipe(fs.createWriteStream(actualFilePath))
-          var xmldoc = new dom().parseFromString("<record/>");
-          var s = new serializer();
-          var baseNode = xmldoc.firstChild;
-          _.each(fileMetadata,(value,key) => {
-              if(_.includes(['cs_uid','repositoryId','fileName','date','cs_allow','cs_type','created','lastAccessed','lastModified','folder','content_type','fileType'],key)){
-                var dataChild = xmldoc.createElement('data');
-                dataChild.setAttribute("name",key);
-                dataChild.appendChild(xmldoc.createTextNode(value));
-                baseNode.appendChild(dataChild);
+            var stream = faClient.getFileContent(data,authResult.access_token)
+              .pipe(fs.createWriteStream(path.join(config.archivePath,'files',fileMetadata.fileName)))
+            stream.on('finish',() => {
+              resolve(fileMetadata);
+            });
+          })
+        })
+        .then((fileMetadata) => {
+          return new Promise((resolve,reject) => {
+            var xmldoc = new dom().parseFromString("<record/>");
+            var s = new serializer();
+            var baseNode = xmldoc.firstChild;
+            _.each(fileMetadata,(value,key) => {
+                if(_.includes(['cs_uid','repositoryId','fileName','date','cs_allow','cs_type','created','lastAccessed','lastModified','folder','content_type','fileType'],key)){
+                  var dataChild = xmldoc.createElement('data');
+                  dataChild.setAttribute("name",key);
+                  dataChild.appendChild(xmldoc.createTextNode(value));
+                  baseNode.appendChild(dataChild);
+                }
+            });
+            var fileChild = xmldoc.createElement('file');
+            fileChild.appendChild(xmldoc.createTextNode(path.join(config.archivePath,'files',fileMetadata.fileName)));
+            baseNode.appendChild(fileChild);
+            fs.writeFile(path.join(config.archivePath,'xml',job.id + '.xml'),s.serializeToString(xmldoc),(err) =>{
+              if(err){
+                reject(err)
               }
-          });
-          var fileChild = xmldoc.createElement('file');
-          fileChild.appendChild(xmldoc.createTextNode(actualFilePath));
-          baseNode.appendChild(fileChild);
-          fs.writeFileSync(xmlFilePath,s.serializeToString(xmldoc));
-
+              else{
+                resolve();
+              }
+            });
+          })
+        })
+        .then(() => {
           done();
         })
-    })
-
-}
+      })
+  }
 
 function getXmlFiles(){
   console.log("Getting xml files");
   return new Promise(function(resolve,reject){
     fs.readdir(path.join(config.archivePath,'xml'),(err,files) => {
       var xmlFiles = _.filter(files,function(f) {
-        return f.endsWith(".xml");
+        return f.endsWith(".xml") && !f.endsWith("input.xml");
       })
       resolve(xmlFiles);
     });
@@ -73,7 +88,8 @@ var finishJob = function(job,done){
   var baseNode = xmldoc.firstChild;
   getXmlFiles()
     .then(function(result){
-      console.log('Reading files')
+      console.log('Reading files ' + result.length)
+
       files = _.map(result,(file) => {
         return path.join(config.archivePath,'xml',file)
       })
@@ -83,7 +99,7 @@ var finishJob = function(job,done){
       return Promise.all(promises);
     })
     .then(function(data){
-      console.log('Appending nodes')
+      console.log('Appending nodes ' + data.length)
       var promises = _.map(data,(node)=>{
         return new Promise((resolve,reject) => {
           baseNode.appendChild(node);
@@ -134,38 +150,37 @@ var finishJob = function(job,done){
             })
   })
   .then(function(response){
-    console.log(response);
     console.log('Waiting for archive');
     return new Promise((resolve,reject) =>{
       setTimeout(() => {
         resolve()
-      },60000)
+      },10000)
     })
   })
   .then(function(){
     console.log('Deleting start')
     return new Promise((resolve,reject)=> {
-      fs.access(path.join(config.archivePath,'xml','start'), fs.constants.R_OK | fs.constants.W_OK, (err) => {
-        if(err){
-          reject(err);
-        }
-        else{
-          fs.unlink(path.join(config.archivePath,'xml','start'),(err2) => {
-            if(err2){
-              reject(err2);
-            }
-            else{
-              fs.unlink(path.join(config.archivePath,'xml','input.xml'),(err3) => {
-                  if(err3){
-                    reject(err3);
+      fs.unlink(path.join(config.archivePath,'xml','input.xml'),(err3) => {
+          if(err3){
+            reject(err3);
+          }
+          else{
+            fs.access(path.join(config.archivePath,'xml','start'), fs.constants.R_OK | fs.constants.W_OK, (err) => {
+              if(err){
+                resolve();
+              }
+              else{
+                fs.unlink(path.join(config.archivePath,'xml','start'),(err2) => {
+                  if(err2){
+                    reject(err2);
                   }
                   else{
-                    resolve();
+                    resolve
                   }
-              })
-            }
-          });
-        }
+                });
+              }
+            })
+          }
       });
     });
   })
@@ -176,6 +191,7 @@ var finishJob = function(job,done){
 }
 
 module.exports = function(ids){
+  console.log("received " + ids.length )
   var jobs = []
   _.each(ids,(obj) => {
     var job = queue.create('fa_archive',{type:'file', vars: obj})

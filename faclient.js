@@ -1,5 +1,5 @@
 var config = require('./config');
-var request = require('request-promise');
+var request = require('request-promise-native');
 var _  = require('lodash');
 var archive = require('./archive');
 module.exports = {
