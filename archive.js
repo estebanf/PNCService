@@ -1,8 +1,8 @@
 var kue = require('kue')
   , queue = kue.createQueue();
-// queue.on('job complete',function(id,result){
-//   console.log(id);
-// })
+
+const uuidv4 = require('uuid/v4');
+
 var _ = require('lodash');
 var faClient = require('./faclient');
 var fs = require('fs');
@@ -12,55 +12,135 @@ var dom = require('xmldom').DOMParser;
 var serializer = require('xmldom').XMLSerializer;
 var request = require('request-promise');
 
+var inputFile = path.join(config.archivePath,'xml','input.xml');
+var startFile = path.join(config.archivePath,'xml','start');
 
+function writeFileContent(id,token){
+  console.log("writeFileContent " + id)
+  return new Promise((resolve,reject) => {
+    faClient.getFile(id)
+      .then((getFileResult) => {
+        var fileMetadata = getFileResult.response.docs[0];
+        var stream = faClient.getFileContent(id,token)
+          .pipe(fs.createWriteStream(path.join(config.archivePath,'files',fileMetadata.fileName)))
+        stream.on('finish',() => {
+          resolve(fileMetadata);
+        });
+      });
+  })
+}
+function createRecord(metadata) {
+  console.log("createRecord");
+  return new Promise((resolve,reject) => {
+    var xmldoc = new dom().parseFromString("<record/>");
+    var s = new serializer();
+    var baseNode = xmldoc.firstChild;
+    _.each(metadata,(value,key) => {
+        if(_.includes(['cs_uid','repositoryId','fileName','date','cs_allow','cs_type','created','lastAccessed','lastModified','folder','content_type','fileType'],key)){
+          var dataChild = xmldoc.createElement('data');
+          dataChild.setAttribute("name",key);
+          dataChild.appendChild(xmldoc.createTextNode(value));
+          baseNode.appendChild(dataChild);
+        }
+    });
+    var fileChild = xmldoc.createElement('file');
+    fileChild.appendChild(xmldoc.createTextNode(path.join(config.archivePath,'files',metadata.fileName)));
+    baseNode.appendChild(fileChild);
+    resolve(baseNode);
+  })
+}
+function createInput(){
+  console.log('createInput')
+  return new Promise((resolve,reject) =>{
+    var xmldoc = new dom().parseFromString("<records/>");
+    var s = new serializer();
+    fs.writeFile(inputFile,s.serializeToString(xmldoc),function(err){
+      if(err){
+        reject(err);
+      }
+      else{
+        resolve()
+      }
+    });
+  })
+}
+function appendRecord(node){
+  console.log('appendRecord')
+  return new Promise((resolve,reject)=> {
+    fs.readFile(inputFile,'utf-8',function(err,contents){
+      if(err){
+        reject(err);
+      }
+      else{
+        var xmldoc = new dom().parseFromString(contents);
+        var baseNode = xmldoc.firstChild;
+        baseNode.appendChild(node);
+        var s = new serializer();
+        fs.writeFile(inputFile,s.serializeToString(xmldoc),function(err){
+          if(err){
+            reject(err);
+          }
+          else{
+            resolve()
+          }
+        })
+      }
+    });
+  })
+}
+
+function submitJob(){
+  console.log('submitJob')
+  return request({
+            uri: 'http://work.everteam.us:8080/et_dev/Capture?Action=Run&Cmd=Submit&Name=FA_ARCHIVE_JOB&Param=FromURL=true&Param=Name=FA_ARCHIVE_JOB&user_token=3c3848679c88cea7395217e9131fd8d754649d77e0f1489a370c934daee91e1c57a370e759ebbb94c6f173fac33b4faf',
+            method:'POST',
+          })
+
+}
+function cleanUp(){
+  console.log('cleanUp')
+  return new Promise((resolve,reject)=> {
+    fs.unlink(inputFile,(err3) => {
+        if(err3){
+          reject(err3);
+        }
+        else{
+          fs.access(startFile, fs.constants.R_OK | fs.constants.W_OK, (err) => {
+            if(err){
+              resolve();
+            }
+            else{
+              fs.unlink(startFile,(err2) => {
+                if(err2){
+                  reject(err2);
+                }
+                else{
+                  resolve
+                }
+              });
+            }
+          })
+        }
+    });
+  });
+
+}
 var processFile = function(job,done){
   var data = job.data.vars
   console.log("processing " + data)
   faClient.authenticate('admin','admin')
     .then((authResult) => {
-      faClient.getFile(data)
-        .then((getFileResult) => {
-          return new Promise((resolve,reject) => {
-            var fileMetadata = getFileResult.response.docs[0];
-            // var xmlFilePath = path.join(config.archivePath,'xml',job.id + '.xml')
-
-            var stream = faClient.getFileContent(data,authResult.access_token)
-              .pipe(fs.createWriteStream(path.join(config.archivePath,'files',fileMetadata.fileName)))
-            stream.on('finish',() => {
-              resolve(fileMetadata);
-            });
-          })
-        })
-        .then((fileMetadata) => {
-          return new Promise((resolve,reject) => {
-            var xmldoc = new dom().parseFromString("<record/>");
-            var s = new serializer();
-            var baseNode = xmldoc.firstChild;
-            _.each(fileMetadata,(value,key) => {
-                if(_.includes(['cs_uid','repositoryId','fileName','date','cs_allow','cs_type','created','lastAccessed','lastModified','folder','content_type','fileType'],key)){
-                  var dataChild = xmldoc.createElement('data');
-                  dataChild.setAttribute("name",key);
-                  dataChild.appendChild(xmldoc.createTextNode(value));
-                  baseNode.appendChild(dataChild);
-                }
-            });
-            var fileChild = xmldoc.createElement('file');
-            fileChild.appendChild(xmldoc.createTextNode(path.join(config.archivePath,'files',fileMetadata.fileName)));
-            baseNode.appendChild(fileChild);
-            fs.writeFile(path.join(config.archivePath,'xml',job.id + '.xml'),s.serializeToString(xmldoc),(err) =>{
-              if(err){
-                reject(err)
-              }
-              else{
-                resolve();
-              }
-            });
-          })
-        })
-        .then(() => {
-          done();
-        })
-      })
+      return writeFileContent(data,authResult.access_token)
+    })
+    .then((metadata) => {
+      return createRecord(metadata);
+    })
+    .then((node) => {
+      return appendRecord(node);
+    })
+    .then(() => {
+      done();
+    })
   }
 
 function getXmlFiles(){
@@ -82,119 +162,32 @@ function getFileNode(file){
     });
   });
 }
-var finishJob = function(job,done){
-  var files = [];
-  var xmldoc = new dom().parseFromString("<records/>");
-  var baseNode = xmldoc.firstChild;
-  getXmlFiles()
-    .then(function(result){
-      console.log('Reading files ' + result.length)
 
-      files = _.map(result,(file) => {
-        return path.join(config.archivePath,'xml',file)
+var finishJob = function(job,done){
+  submitJob()
+    .then((resp) => {
+      return new Promise((resolve,reject) =>{
+        setTimeout(() => {
+          resolve()
+        },60000)
       })
-      var promises = _.map(result,(file) => {
-        return getFileNode(file);
-      });
-      return Promise.all(promises);
     })
-    .then(function(data){
-      console.log('Appending nodes ' + data.length)
-      var promises = _.map(data,(node)=>{
-        return new Promise((resolve,reject) => {
-          baseNode.appendChild(node);
-          resolve();
-        })
-      })
-      return Promise.all(promises);
+    .then(() => {
+      return cleanUp()
     })
-    .then(function(){
-      console.log('Writing input.xml')
-      var s = new serializer();
-      return new Promise((resolve,reject) => {
-        fs.writeFile(path.join(config.archivePath,'xml','input.xml'),s.serializeToString(xmldoc),function(err){
-          if(err){
-            reject(err);
-          }
-          else{
-            resolve()
-          }
-        });
-      });
+    .then(() => {
+      done();
     })
-    .then(function(){
-      var promises = _.map(files,(file) => {
-        return new Promise(function(resolve,reject){
-          console.log('Deleting ' + file);
-          if(file.endsWith('input.xml')){
-            resolve();
-          }
-          else{
-            fs.unlink(file,(err) => {
-              if(err){
-                reject(err);
-              }
-              else{
-                resolve()
-              }
-            });
-          }
-        })
-      })
-      return Promise.all(promises);
-    })
-  .then(function(){
-    return request({
-              uri: 'http://work.everteam.us:8080/et_dev/Capture?Action=Run&Cmd=Submit&Name=FA_ARCHIVE_JOB&Param=FromURL=true&Param=Name=FA_ARCHIVE_JOB&user_token=3c3848679c88cea7395217e9131fd8d754649d77e0f1489a370c934daee91e1c57a370e759ebbb94c6f173fac33b4faf',
-              method:'POST',
-            })
-  })
-  .then(function(response){
-    console.log('Waiting for archive');
-    return new Promise((resolve,reject) =>{
-      setTimeout(() => {
-        resolve()
-      },10000)
-    })
-  })
-  .then(function(){
-    console.log('Deleting start')
-    return new Promise((resolve,reject)=> {
-      fs.unlink(path.join(config.archivePath,'xml','input.xml'),(err3) => {
-          if(err3){
-            reject(err3);
-          }
-          else{
-            fs.access(path.join(config.archivePath,'xml','start'), fs.constants.R_OK | fs.constants.W_OK, (err) => {
-              if(err){
-                resolve();
-              }
-              else{
-                fs.unlink(path.join(config.archivePath,'xml','start'),(err2) => {
-                  if(err2){
-                    reject(err2);
-                  }
-                  else{
-                    resolve
-                  }
-                });
-              }
-            })
-          }
-      });
-    });
-  })
-  .then(function(){
-    console.log('done')
-    done();
-  })
 }
 
 module.exports = function(ids){
+  var q = uuidv4();
+
   console.log("received " + ids.length )
   var jobs = []
   _.each(ids,(obj) => {
-    var job = queue.create('fa_archive',{type:'file', vars: obj})
+    var job = queue.create(q,{type:'file', vars: obj})
+      .removeOnComplete( true )
       .save((err) => {
         if(err){
           console.log(job.id)
@@ -205,19 +198,23 @@ module.exports = function(ids){
         }
       })
   });
-  var finalJob = queue.create('fa_archive',{type:'finish', vars:jobs}).save((err) => {
-    if(err){
-      console.log(job.id)
-      console.log(err);
-    }
-  })
-
-  queue.process('fa_archive',(job,done) => {
-    if(job.data.type == 'file'){
-      processFile(job,done);
-    }
-    else{
-      finishJob(job,done);
-    }
-  })
+  var finalJob = queue.create(q,{type:'finish', vars:jobs})
+    .removeOnComplete( true )
+    .save((err) => {
+      if(err){
+        console.log(job.id)
+        console.log(err);
+      }
+    })
+  createInput()
+    .then(()=> {
+      queue.process(q,(job,done) => {
+        if(job.data.type == 'file'){
+          processFile(job,done);
+        }
+        else{
+          finishJob(job,done);
+        }
+      })
+    })
 }
