@@ -155,7 +155,14 @@ var finishJob = function(job,done){
               reject(err2);
             }
             else{
-              resolve();
+              fs.unlink(path.join(config.archivePath,'xml','input.xml'),(err3) => {
+                  if(err3){
+                    reject(err3);
+                  }
+                  else{
+                    resolve();
+                  }
+              })
             }
           });
         }
