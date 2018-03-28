@@ -109,16 +109,20 @@ var finishJob = function(job,done){
     .then(function(){
       var promises = _.map(files,(file) => {
         return new Promise(function(resolve,reject){
-          console.log('Deleting ' + file)
-          fs.unlink(file,(err) => {
-            if(err){
-              reject(err);
-            }
-            else{
-              resolve()
-            }
-          });
-
+          console.log('Deleting ' + file);
+          if(file.endsWith('input.xml')){
+            resolve();
+          }
+          else{
+            fs.unlink(file,(err) => {
+              if(err){
+                reject(err);
+              }
+              else{
+                resolve()
+              }
+            });
+          }
         })
       })
       return Promise.all(promises);
