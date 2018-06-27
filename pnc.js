@@ -2,6 +2,7 @@ var config = require('./config');
 var request = require('request-promise');
 var _  = require('lodash');
 var archive = require('./archive');
+var w2 = require('./w2.js');
 var faClient = require('./faclient');
 // require('request-debug')(request);
 
@@ -29,9 +30,11 @@ module.exports = function(app){
     var data = req.body.cs_uid;
     faClient.authenticate('admin','admin')
       .then(function(body){
-        var token = JSON.parse(body).access_token
-        request({
-          uri: encodeURI('http://fa.everteam.us:8080/storage/api/files/delete?ids=' + JSON.stringify(data)),
+        console.log(body);
+	//var token = JSON.parse(body).access_token
+        var token =body.access_token
+	request({
+          uri: encodeURI('http://discover.everteam.us:8080/storage/api/files/delete?ids=' + JSON.stringify(data)),
           method:'POST',
           headers:{
             'Authorization':'Bearer ' + token,
@@ -59,4 +62,11 @@ module.exports = function(app){
     archive(ids);
     res.status(200).send({status:"ok"});
   })
+  app.post('/w2',(req,res) => {
+    // console.log(JSON.stringify(req.body));
+    var data = req.body;
+    w2(data);
+    res.status(200).send({status:"ok"});
+  });
+
 }

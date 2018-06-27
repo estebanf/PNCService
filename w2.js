@@ -15,28 +15,30 @@ var request = require('request-promise');
 var inputFile = path.join(config.archivePath,'xml','input.xml');
 var startFile = path.join(config.archivePath,'xml','start');
 
-function writeFileContent(id,token){
-  console.log("writeFileContent " + id)
+function writeFileContent(data){
+  console.log("writeFileContent " + data.archive_file)
+  var filename = data.archive_file.substring(data.archive_file.lastIndexOf('/')+1);
   return new Promise((resolve,reject) => {
-    faClient.getFile(id)
-      .then((getFileResult) => {
-        var fileMetadata = getFileResult.response.docs[0];
-        var stream = faClient.getFileContent(id,token)
-          .pipe(fs.createWriteStream(path.join(config.archivePath,'files',fileMetadata.fileName)))
-        stream.on('finish',() => {
-          resolve(fileMetadata);
-        });
-      });
-  })
+    var stream = request({
+      uri: data.archive_file,
+      headers:{
+        'Accept':'application/octet-stream'
+      }
+    })
+      .pipe(fs.createWriteStream(path.join(config.archivePath,'files',filename)))
+    stream.on('finish',() => {
+      resolve(data);
+    });
+  });
 }
-function createRecord(metadata) {
+function createRecord(data) {
   console.log("createRecord");
   return new Promise((resolve,reject) => {
     var xmldoc = new dom().parseFromString("<record/>");
     var s = new serializer();
     var baseNode = xmldoc.firstChild;
-    _.each(metadata,(value,key) => {
-        if(_.includes(['cs_uid','repositoryId','fileName','date','cs_allow','cs_type','created','lastAccessed','lastModified','folder','content_type','fileType'],key)){
+    _.each(data,(value,key) => {
+        if(_.includes(['w2_no','year','employee_no','full_name','emp_status','hire_date','term_date','ssan4','job_title','department'],key)){
           var dataChild = xmldoc.createElement('data');
           dataChild.setAttribute("name",key);
           dataChild.appendChild(xmldoc.createTextNode(value));
@@ -44,7 +46,7 @@ function createRecord(metadata) {
         }
     });
     var fileChild = xmldoc.createElement('file');
-    fileChild.appendChild(xmldoc.createTextNode(path.join(config.archivePath,'files',metadata.fileName)));
+    fileChild.appendChild(xmldoc.createTextNode(path.join(config.archivePath,'files',data.archive_file.substring(data.archive_file.lastIndexOf('/')+1))));
     baseNode.appendChild(fileChild);
     resolve(baseNode);
   })
@@ -92,7 +94,7 @@ function appendRecord(node){
 function submitJob(){
   console.log('submitJob')
   return request({
-            uri: 'http://records.everteam.us:8080/et_dev/Capture?Action=Run&Cmd=Submit&Name=FA_ARCHIVE_JOB&Param=FromURL=true&Param=Name=FA_ARCHIVE_JOB&user_token=3c3848679c88cea7395217e9131fd8d754649d77e0f1489a370c934daee91e1c57a370e759ebbb94c6f173fac33b4faf',
+            uri: 'http://records.everteam.us:8080/et_dev/Capture?Action=Run&Cmd=Submit&Name=W2_ARCHIVE_JOB&Param=FromURL=true&Param=Name=FA_ARCHIVE_JOB&user_token=3c3848679c88cea7395217e9131fd8d754649d77e0f1489a370c934daee91e1c57a370e759ebbb94c6f173fac33b4faf',
             method:'POST',
           })
 
@@ -128,12 +130,9 @@ function cleanUp(){
 var processFile = function(job,done){
   var data = job.data.vars
   console.log("processing " + data)
-  faClient.authenticate('admin','admin')
-    .then((authResult) => {
-      return writeFileContent(data,authResult.access_token)
-    })
-    .then((metadata) => {
-      return createRecord(metadata);
+  writeFileContent(data)
+    .then((data) => {
+      return createRecord(data);
     })
     .then((node) => {
       return appendRecord(node);
@@ -180,12 +179,12 @@ var finishJob = function(job,done){
     })
 }
 
-module.exports = function(ids){
+module.exports = function(data){
   var q = uuidv4();
 
-  console.log("received " + ids.length )
+  console.log("received " + data.length )
   var jobs = []
-  _.each(ids,(obj) => {
+  _.each(data,(obj) => {
     var job = queue.create(q,{type:'file', vars: obj})
       .removeOnComplete( true )
       .save((err) => {
