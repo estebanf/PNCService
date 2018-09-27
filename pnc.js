@@ -56,7 +56,7 @@ module.exports = function(app){
     var ids = [];
     _.each(keys, function(key){
       if(data[key]) {
-        ids.push(key);
+        ids.push(data[key]);
       }
     })
     archive(ids);
