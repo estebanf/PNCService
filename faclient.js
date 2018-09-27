@@ -37,7 +37,7 @@ module.exports = {
   },
   getTaggedFiles: function(tag,cb){
     request.get({
-      uri: config.solr + '/select?rows=1000&fl=cs_uid,repositoryId,fileName,folderPath,content_type,fileSize&q=user_action:' + tag,
+      uri: config.solr + '/select?rows=1000&fl=cs_uid,repositoryId,fileName,folderPath,content_type,fileSize&q=tags:' + tag,
       json:true
     })
     .then(function(data){
